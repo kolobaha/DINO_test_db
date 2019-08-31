@@ -1,0 +1,239 @@
+/*Dear applicants,
+here you can find data set created for your test.
+
+Our goal is to highlight your skills, so your task is:
+- Perform analysis of MySQL DB extract
+- Document DB structure (UML, English language)
+- Use SQL for data aggregation and reporting
+
+As result of your SQL task, following reports should be created:
+- Total expenses
+- Top 10: Most active users
+- Top 10: Users with highest charges, and daily distribution for each of them
+
+The result of your efforts should be allocated at GitHub, for our check. 
+
+It's ok to upload partial results, because it can demonstrate your attitude.
+*/
+/*
+To uderstand what is described in this DB-Scheme at first it's required to estimate usage of UID.Call_logs column:
+It might be call-responsible person, with whom payment and activity of this call is associated .
+If it so, then for all calls which are 'out' From.Call_forwarding number has to be considered with UID of this number:
+*/
+select cl.from, cl.to,cl.call_dir,num_from.uid as from_uid, num_to.uid as to_uid, cl.uid, case	
+																						 when num_from.uid=cl.uid then 't'
+																						 else ''
+																						 end as is_uid_eq_FROM_uid, 
+																						 case	
+																						 when num_to.uid=cl.uid then 't'
+																						 else ''
+																						 end as is_uid_eq_TO_uid
+		from Call_logs cl join Numbers num_from on (cl.from = num_from.phone_number) 
+		join Numbers num_to on (cl.to = num_to.phone_number);
+/* . . . order by cl.from desc limit 10: 
+	+------+------+----------+----------+--------+-------+--------------------+------------------+
+	| from | to   | call_dir | from_uid | to_uid | uid   | is_uid_eq_FROM_uid | is_uid_eq_TO_uid |
+	+------+------+----------+----------+--------+-------+--------------------+------------------+
+	| 1000 |  799 | out      |    96083 |  22350 | 64574 |                    |                  |
+	| 1000 |  987 | out      |    96083 |  10163 | 96083 | t                  |                  |
+	| 1000 |  684 | out      |    96083 |  56966 | 95134 |                    |                  |
+	| 1000 |  179 | out      |    96083 |  94870 | 77320 |                    |                  |
+	| 1000 |  563 | out      |    96083 |  72483 | 95212 |                    |                  |
+	| 1000 |  272 | out      |    96083 |  67670 |  2502 |                    |                  |
+	| 1000 |  819 | out      |    96083 |  14326 | 89107 |                    |                  |
+	| 1000 |  289 | out      |    96083 |  84116 | 63378 |                    |                  |
+	| 1000 |  608 | out      |    96083 |  89257 | 43819 |                    |                  |
+	|  987 |  799 | out      |    10163 |  22350 | 82621 |                    |                  |
+	+------+------+----------+----------+--------+-------+--------------------+------------------+
+
+*/	
+select cf.* from Call_forwarding cf where cf.from = 799 or cf.to = 799;
+--Empty set (0,00 sec)
+
+select * from Numbers where uid = 64574;
+--Empty set (0,00 sec)
+-- Result of those queries says that UID.Call_logs means nothing because it's possible to have From.Call_logs number not represented in Numbers and Accounts tables; 	
+
+select cl.*,acc.uid, num.phone_number 
+	from Call_logs cl join Accounts acc on (cl.uid = acc.uid) 
+	join Numbers num on (num.uid = acc.uid) 
+where cl.call_dir = 'in' 
+limit 5;
+
+select cl.* , cl1.UID 
+	from Call_logs cl join Call_logs cl1 
+		on (cl.from = cl1.to and cl1.to = cl1.from and cl1.uid = cl.uid);
+
+select cl.*, cf.to as 'Forwarded TO', num.phone_number 
+	from Call_logs cl 
+		join Call_forwarding cf
+		on (cf.from = cl.to)
+		join Numbers num
+		on(num.uid = cl.uid);
+select cl.
+
+select * from Numbers where phone_number in 
+		(select cl.from from Call_logs cl where uid =33998 
+		 union select cl.to from Call_logs cl where uid=33998);
+
+-- TASK 1. Total expenses. Let's caclulate fee for every call writen in Call_logs table and get this count:		 
+
+select sum((select money from Rates where Rates.ID =(case
+												when cl.Call_dir = 'in' then 1
+												when (select count(*) from Numbers where phone_number = cl.to)> 1 then 2 -- Here we chose type of call in Rates table
+												else 3   end))*(cl.timestamp_end-cl.timestamp_start)) as Total_Expanses
+		from Call_logs cl;
+/* result:
+	+-------------------+
+	| Total_Expanses    |
+	+-------------------+
+	| 3948.679999999996 |
+	+-------------------+
+*/
+-- Task 2. Top 10 Most active users:
+-- Activity in our case is equal to call initiation, so let's calculate this:
+select  num.uid as UID,count(*) as Calls_count
+		from Call_logs cl 
+		join Numbers num on (num.phone_number = cl.from) -- here we look at From.Call_logs column
+group by num.uid 
+order by count(*) desc
+limit 10;
+/* result:
+	+-------+----------+
+	| UID   | count(*) |
+	+-------+----------+
+	| 19047 |       29 |
+	| 40156 |       28 |
+	|  4468 |       22 |
+	| 63546 |       20 |
+	| 71788 |       16 |
+	| 89257 |       16 |
+	| 32112 |       16 |
+	| 84028 |       15 |
+	| 54820 |       15 |
+	| 75919 |       15 |
+	+-------+----------+	
+*/ 
+-- TASK 3. Top 10: Users with highest charges, and daily distribution for each of them
+-- Let's first estimate how much money each user spent (in our case expenses can only belong to From.Call_logs - number holders in 'out' calls):
+select num.uid, round (sum((select money from Rates where Rates.ID =(case
+												when cl.Call_dir = 'in' then 1
+												when (select count(*) from Numbers where phone_number = cl.to)> 1 then 2 -- Here we chose type of call in Rates table
+												else 3   end))*(cl.timestamp_end-cl.timestamp_start)),2) as Total_Charge
+	 from Call_logs cl join Numbers num on (num.phone_number = cl.From)
+	 where cl.Call_dir = 'out'
+	 group by num.uid
+	 order by 2 desc
+	 limit 10;
+--Result:
+/*
+	+-------+--------------+
+	| uid   | Total_Charge |
+	+-------+--------------+
+	| 19047 |       153.28 |
+	| 40156 |       111.92 |
+	| 75919 |       102.56 |
+	|  4468 |       101.12 |
+	| 27065 |        93.12 |
+	| 74156 |        92.92 |
+	| 32112 |        83.92 |
+	| 76835 |        77.20 |
+	| 63546 |        74.24 |
+	| 67670 |        70.60 |
+	+-------+--------------+
+*/
+-- create view for this query: 	 
+create view top_charge_callers as select num.uid, round (sum((select money from Rates where Rates.ID =(case
+												when cl.Call_dir = 'in' then 1
+												when (select count(*) from Numbers where phone_number = cl.to)> 1 then 2 -- Here we chose type of call in Rates table
+												else 3   end))*(cl.timestamp_end-cl.timestamp_start)),2) as Total_Charge, count(*)
+	 from Call_logs cl join Numbers num on (num.phone_number = cl.From)
+	 where cl.Call_dir = 'out'
+	 group by num.uid
+	 order by 2 desc
+	 limit 10;
+
+-- And now let's calculate daily distribution (by minute as all the calls in dataset belong to the timeframe of 2019-03-07  17:...):
+
+select minute(cl.timestamp_start) as "Minute of 2019-03-07   17:..." , num.uid ,count(*) from Call_logs cl join Numbers num on (num.phone_number = cl.From)
+where num.uid  in (select tcc.uid from top_charge_callers tcc) and call_dir = 'out'
+group by 1,2
+order by 3 desc;
+/*
+	+-------------------------------+-------+----------+
+	| Minute of 2019-03-07   17:... | uid   | count(*) |
+	+-------------------------------+-------+----------+
+	|                            37 | 40156 |        6 |
+	|                            37 | 19047 |        6 |
+	|                            38 | 19047 |        5 |
+	|                            39 |  4468 |        4 |
+	|                            38 | 40156 |        4 |
+	|                            39 | 63546 |        4 |
+	|                            39 | 74156 |        4 |
+	|                            39 | 27065 |        4 |
+	|                            38 | 74156 |        4 |
+	|                            37 |  4468 |        3 |
+	|                            38 | 75919 |        3 |
+	|                            38 |  4468 |        3 |
+	|                            39 | 19047 |        3 |
+	|                            38 | 27065 |        3 |
+	|                            38 | 32112 |        3 |
+	|                            37 | 75919 |        3 |
+	|                            38 | 63546 |        3 |
+	|                            39 | 75919 |        3 |
+	|                            38 | 76835 |        3 |
+	|                            40 | 19047 |        3 |
+	|                            39 | 32112 |        3 |
+	|                            37 | 63546 |        2 |
+	|                            40 | 67670 |        2 |
+	|                            39 | 40156 |        2 |
+	|                            39 | 67670 |        2 |
+	|                            38 | 67670 |        2 |
+	|                            37 | 27065 |        2 |
+	|                            40 |  4468 |        2 |
+	|                            37 | 32112 |        2 |
+	|                            39 | 76835 |        1 |
+	|                            40 | 74156 |        1 |
+	|                            36 | 76835 |        1 |
+	|                            36 | 63546 |        1 |
+	|                            36 | 75919 |        1 |
+	|                            40 | 63546 |        1 |
+	|                            40 | 75919 |        1 |
+	|                            40 | 40156 |        1 |
+	|                            40 | 76835 |        1 |
+	|                            37 | 76835 |        1 |
+	+-------------------------------+-------+----------+
+*/
+-- Used for analysis of Call_forwarding table the follow function:
+-- Stollen and eddited from https://www.artfulsoftware.com/mysqlbook/sampler/mysqled1ch20.html 
+DROP PROCEDURE IF EXISTS ListReached; -- list of recheable numbers from "root_number" - phone_number in Call_forwarding table (as graph)
+DELIMITER go
+
+CREATE PROCEDURE ListReached( IN root_number int(11) )
+BEGIN
+DECLARE rows_c SMALLINT DEFAULT 0;
+DROP TABLE IF EXISTS reached;
+CREATE TABLE reached (
+reached_number int(11) PRIMARY KEY
+) ENGINE=HEAP;
+INSERT INTO reached VALUES (root_number);
+SET rows_c = ROW_COUNT();
+WHILE rows_c > 0 DO
+	INSERT IGNORE INTO reached
+		SELECT DISTINCT cf.to
+			FROM Call_forwarding AS cf
+			INNER JOIN reached AS p ON cf.from = p.reached_number;
+			SET rows_c = ROW_COUNT();
+	INSERT IGNORE INTO reached
+		SELECT DISTINCT cf.from
+			FROM Call_forwarding AS cf
+			INNER JOIN reached AS p ON cf.to = p.reached_number;
+			SET rows_c = rows_c + ROW_COUNT();
+			END WHILE;
+SELECT * FROM reached;
+DROP TABLE reached;
+END;
+go
+DELIMITER ;
+
+
